@@ -1,0 +1,17 @@
+<svg width="280" height="64" viewBox="0 0 280 64" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">iFire Protection</title>
+  <desc id="desc">Flame icon and strong brand wordmark</desc>
+  <defs>
+    <linearGradient id="g" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0%" stop-color="#0E2B8B"/>
+      <stop offset="100%" stop-color="#FDB022"/>
+    </linearGradient>
+  </defs>
+  <g transform="translate(6,6)">
+    <path d="M22 2 C26 9,13 13,19 20 C24 25,30 18,30 28 C30 38,22 46,15 46 C7 46,0 39,0 30 C0 20,7 16,10 10 C11 8,11 6,10 4 C14 6,18 4,22 2 Z" fill="url(#g)"/>
+    <circle cx="16" cy="30" r="6" fill="#fff" opacity="0.9"/>
+  </g>
+  <text x="72" y="42" font-family="Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif" font-size="28" fill="#0B1220" font-weight="900">
+    iFire <tspan fill="#0E2B8B">Protection</tspan>
+  </text>
+</svg>

@@ -1,0 +1,56 @@
+<?php
+
+use Illuminate\Foundation\Application;
+
+use App\Http\Middleware\Admin;
+use Illuminate\Foundation\Configuration\Exceptions;
+use Illuminate\Foundation\Configuration\Middleware;
+use Illuminate\Console\Scheduling\Schedule;
+use App\Jobs\SyncShopifyProductsJob;
+use App\Jobs\BuildRecommendationsJob;
+use Illuminate\Support\Facades\Route;
+use Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful;
+
+return Application::configure(basePath: dirname(__DIR__))
+    ->withRouting(
+        web: __DIR__ . '/../routes/web.php',
+        commands: __DIR__ . '/../routes/console.php',
+        health: '/up',
+        then: function () {
+            Route::middleware('api')
+                ->prefix('api')
+                ->group(base_path('routes/api.php'));
+
+            Route::middleware(['web', 'auth', 'admin'])
+                ->prefix('admin')
+                ->group(base_path('routes/backend.php'));
+
+            Route::middleware(['web', 'auth', 'admin'])
+                ->prefix('admin')
+                ->group(base_path('routes/admin_setting.php'));
+
+            Route::middleware(['web'])
+                ->group(base_path('routes/frontend.php'));
+        }
+    )
+    ->withMiddleware(function (Middleware $middleware) {
+        $middleware->alias([
+            'admin' => Admin::class,
+        ]);
+        $middleware->appendToGroup('api', [
+            EnsureFrontendRequestsAreStateful::class,
+        ]);
+        $middleware->validateCsrfTokens(except: [
+            'api/v1/webhooks/stripe',  
+        ]);
+    })
+    ->withExceptions(function (Exceptions $exceptions) {
+        //
+    })
+    ->withSchedule(function (Schedule $schedule) {
+        // Nightly Shopify sync & recommendations
+        $schedule->job(new SyncShopifyProductsJob())->dailyAt('02:00');
+        $schedule->job(new BuildRecommendationsJob())->dailyAt('03:00');
+        $schedule->command('quests:dispatch-pending')->everyMinute();
+    })
+    ->create();

@@ -1,0 +1,112 @@
+<?php
+namespace App\Http\Controllers\Api\Auth;
+
+use App\Actions\CreateTenantAction;
+use App\Http\Controllers\Controller;
+use App\Http\Requests\User\StoreSocialUserRequest;
+use App\Models\CandidateProfile;
+use App\Models\User;
+use App\Services\SubscriptionService;
+use App\Traits\ApiResponse;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Str;
+
+class SocialAuthController extends Controller
+{
+    use ApiResponse;
+    protected CreateTenantAction $createTenant;
+
+    public function __construct(CreateTenantAction $createTenant)
+    {
+        $this->createTenant = $createTenant;
+    }
+
+    public function socialLogin(StoreSocialUserRequest $request)
+    {
+        $data = $request->validated();
+        $role = $data['role'];
+
+        // 1 Find user (provider OR email)
+        $user = User::where(function ($q) use ($data) {
+            $q->where('provider', $data['provider'])->where('provider_id', $data['provider_id']);
+        })
+            ->orWhere('email', $data['email'])
+            ->first();
+
+        //  Download avatar (optional)
+        $avatarPath = null;
+
+        if (! empty($data['avatar_path'])) {
+            try {
+                $contents  = file_get_contents($data['avatar_path']);
+                $imageName = Str::uuid() . '.jpg';
+
+                $folder = 'uploads/profileImages';
+                $path   = public_path($folder);
+
+                if (! file_exists($path)) {
+                    mkdir($path, 0755, true);
+                }
+
+                file_put_contents($path . '/' . $imageName, $contents);
+                $avatarPath = '/' . $folder . '/' . $imageName;
+            } catch (\Exception $e) {
+                // Ignore avatar failure (do not block login)
+            }
+        }
+
+        //  Create user if not exists
+        if (! $user) {
+            $user = User::create([
+                'first_name'        => $data['first_name'] ?? 'Unknown',
+                'last_name'         => $data['last_name'] ?? null,
+                'email'             => $data['email'],
+                'provider'          => $data['provider'],
+                'provider_id'       => $data['provider_id'],
+                'password'          => Hash::make(Str::random(24)),
+                'avatar_path'       => $avatarPath,
+                'email_verified_at' => now(),
+                'is_active'         => true,
+                'tenant_id'         => null,
+            ]);
+
+            // Assign role
+            if ($role === 'recruiter') {
+                $user->assignRole(['recruiter']);
+            } else {
+                $user->assignRole('user');
+            }
+        }
+
+        //  Recruiter → Tenant + Trial
+        if ($user->hasRole('recruiter') && ! $user->tenant_id) {
+
+            $tenant = $this->createTenant->execute($user);
+
+            SubscriptionService::startTrial($tenant->id);
+
+        } elseif ($user->hasRole('user') && ! $user->candidateProfile()->exists()) {
+            CandidateProfile::create([
+                'user_id' => $user->id,
+            ]);
+        }
+
+        $token = $user->createToken('api')->plainTextToken;
+
+        $user->fresh();
+        $user->load('tenant', 'candidateProfile', 'candidateProfile.socialLinks:platform,url,sort_order');
+
+        // Get first assigned role
+        $role = $user->roles()->select('id', 'name')->first();
+        // Get permissions for that role
+        $permissions = $role ? $role->permissions()->pluck('name') : collect();
+
+        return $this->success([
+            'user'        => $user,
+            'role'        => $role ? $role->name : null,
+            'permissions' => $permissions, // collection of permission names
+            'token'       => $token,
+            'token_type'  => 'Bearer',
+        ], 'Login successful');
+    }
+}

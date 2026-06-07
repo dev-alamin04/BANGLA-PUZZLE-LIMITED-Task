@@ -1,0 +1,692 @@
+
+C:\Users\al_amin\Herd\christophlombar\routes\backend.php
+//projects module 
+Route::name('admin.')->group(function () {
+    Route::resource('projects',ProjectController::class);
+});
+
+
+==============
+
+C:\Users\al_amin\Herd\christophlombar\app\Http\Controllers\Web\Backend\Projects\ProjectController.php
+
+<?php
+namespace App\Http\Controllers\Web\Backend\Projects;
+
+use App\Http\Controllers\Controller;
+use App\Models\Project;
+use App\Models\ServiceArea;
+use Illuminate\Http\Request;
+use Yajra\DataTables\DataTables;
+
+class ProjectController extends Controller
+{
+    // Project List / DataTable
+
+    public function index(Request $request)
+    {
+        if ($request->ajax()) {
+            $query = Project::with('serviceAreas')->latest()->get();
+
+            return DataTables::of($query)
+                ->addIndexColumn()
+                ->addColumn('title', fn($project) => $project->title)
+                ->addColumn('description', fn($project) => $project->description)
+                ->addColumn('image', function ($project) {
+                    return $project->image
+                        ? '<img src="' . asset($project->image) . '" style="width:50px;height:50px;object-fit:cover;">'
+                        : '-';
+                })
+                ->addColumn('action', function (Project $data) {
+                    return view('components.action-buttons', [
+                        'id'     => $data->id,
+                        'show'   => 'admin.projects.show',
+                        'edit'   => 'admin.projects.edit',
+                        'delete' => true,
+                    ])->render();
+                })
+                ->rawColumns(['image', 'action'])
+                ->make(true);
+        }
+
+        return view('backend.layouts.projects.index');
+    }
+
+    // Create Project Form
+    public function create()
+    {
+        $serviceAreas = ServiceArea::all();
+        return view('backend.layouts.projects.create', compact('serviceAreas'));
+    }
+
+    // Store New Project
+    public function store(Request $request)
+    {
+        $validated = $request->validate([
+            'title'           => 'required|string|max:255',
+            'description'     => 'nullable|string',
+            'image'           => 'nullable|image|mimes:jpeg,png,jpg,gif,svg|max:20480',
+            'services_area'   => 'required|array|min:1',
+            'services_area.*' => 'exists:service_area,id',
+        ]);
+
+        $serviceAreas = $validated['services_area'];
+        unset($validated['services_area']);
+
+        // Upload image
+        if ($request->hasFile('image')) {
+            $validated['image'] = uploadFile($request->file('image'), 'uploads/projects');
+        }
+
+        $project = Project::create($validated);
+
+        // Attach services
+        $project->serviceAreas()->sync($serviceAreas);
+
+        return redirect()->route('admin.projects.index')->with('success', 'Project created successfully.');
+    }
+
+    // Show Project
+    public function show(Project $project)
+    {
+        $project->load('serviceAreas');
+        return view('backend.layouts.projects.show', compact('project'));
+    }
+
+    // Edit Project Form
+    public function edit(Project $project)
+    {
+        $project->load('serviceAreas');
+        $serviceAreas = ServiceArea::all();
+
+        return view('backend.layouts.projects.edit', compact('project', 'serviceAreas'));
+    }
+
+    // Update Project
+    public function update(Request $request, Project $project)
+    {
+        // Validation
+        $request->validate([
+            'title'           => 'required|string|max:255',
+            'description'     => 'nullable|string',
+            'services_area'   => 'nullable|array',
+            'services_area.*' => 'exists:service_area,id',
+            'image'           => 'nullable|image|mimes:jpeg,png,jpg,gif,webp|max:2048',
+        ]);
+
+        // Update basic fields
+        $project->title       = $request->title;
+        $project->description = $request->description;
+
+        // Update image if uploaded
+        if ($request->hasFile('image')) {
+            deleteFile($project->image);
+            $project->image = uploadFile($request->file('image'), 'uploads/projects');
+        }
+
+        $project->save();
+
+        // Sync services areas
+        if ($request->has('services_area')) {
+            $project->serviceAreas()->sync($request->services_area);
+        } else {
+            $project->serviceAreas()->sync([]);
+        }
+
+        return redirect()
+            ->route('admin.projects.index')
+            ->with('success', 'Project updated successfully!');
+    }
+
+    // Delete Project
+    public function destroy(Project $project)
+    {
+        if ($project->image) {
+            deleteFile($project->image);
+        }
+
+        $project->serviceAreas()->sync([]);
+        $project->delete();
+
+        return response()->json(['message' => 'Project deleted successfully.']);
+    }
+}
+
+
+
+========================
+C:\Users\al_amin\Herd\christophlombar\resources\views\backend\layouts\projects\index.blade.php
+
+@extends('backend.layouts.app')
+@section('title', ' || Projects')
+
+@section('content')
+    <div class="content-wrapper">
+        <x-breadcrumbs title="Projects" :breadcrumbs="[['text' => 'Projects', 'url' => route('admin.projects.index')]]" />
+
+        <div class="row">
+            <div class="col-12 grid-margin stretch-card">
+                <div class="card">
+                    <div class="card-body">
+                        <x-table-header title="Projects List" :route="route('admin.projects.create')" />
+                        <div class="table-responsive">
+                            <table class="table table-hover table-striped" id="projects-table">
+                                <thead>
+                                    <tr>
+                                        <th>S/L</th>
+                                        <th>Image</th>
+                                        <th>Title</th>
+                                        <th class="text-center">Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+@endsection
+
+@section('modal')
+   
+@endsection
+
+@section('script')
+    @include('backend.layouts.projects.partials._projectsJS')
+@endsection
+
+
+
+
+
+
+===============
+C:\Users\al_amin\Herd\christophlombar\resources\views\backend\layouts\projects\create.blade.php
+
+@extends('backend.layouts.app')
+
+@section('title', 'Projects || Admin')
+
+@push('style')
+    <!-- For Multiple Select -->
+    <link rel="stylesheet" href="{{ asset('backend/assets/vendors/select2/select2.min.css') }}">
+    <link rel="stylesheet" href="{{ asset('backend/assets/vendors/select2-bootstrap-theme/select2-bootstrap.min.css') }}">
+    <link rel="stylesheet" href="{{ asset('backend/assets/css/select2.css') }}">
+@endpush
+
+@section('content')
+    <div class="main-content">
+        <div class="page-content">
+            <div class="container-fluid">
+
+                <div class="toolbar" id="kt_toolbar">
+                    <div class="container-fluid d-flex flex-stack">
+                        <div class="d-flex flex-column">
+                            <h1 class="fw-bold fs-2">Add New Project</h1>
+
+                            <ul class="breadcrumb fw-semibold fs-base">
+                                <li class="breadcrumb-item"><a href="{{ url('admin/dashboard') }}">Home</a></li>
+                                <li class="breadcrumb-item"><a href="{{ url('admin/projects') }}">Projects</a></li>
+                                <li class="breadcrumb-item text-muted">Create</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+
+                <section>
+                    <div class="container-fluid">
+                        <div class="card card-body shadow-lg p-4">
+                            <form action="{{ route('admin.projects.store') }}" method="POST" enctype="multipart/form-data">
+                                @csrf
+
+
+                                <div class="row">
+                                    <div class="col-md-6 mb-3">
+                                        <label class="form-label fw-bold">Title</label>
+                                        <input type="text" name="title" id="title" class="form-control" required>
+                                    </div>
+
+                                    <div class="col-md-6 mb-3">
+                                        <label class="form-label fw-bold">Choice Service Area</label>
+
+                                        <select class="form-control js-example-basic-multiple" name="services_area[]"
+                                            multiple>
+                                            @foreach ($serviceAreas as $service)
+                                                <option value="{{ $service->id }}">{{ $service->area }}</option>
+                                            @endforeach
+                                        </select>
+                                    </div>
+
+                                    <div class="col-md-12 mb-3">
+                                        <label class="form-label fw-bold">Description</label>
+                                        <textarea name="description" class="form-control" placeholder="Enter your content here..." rows="6"></textarea>
+                                    </div>
+                                    <div class="col-md-12 mb-3">
+                                        <label class="form-label fw-bold">Featured Image</label>
+                                        <input type="file" name="image" class="dropify">
+                                    </div>
+                                </div>
+                                <div class="mt-4 float-end">
+                                    <a href="{{ route('admin.projects.index') }}"
+                                        class="btn btn-secondary btn-md me-2">Back</a>
+                                    <button type="submit" class="btn btn-primary btn-md">Save</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </section>
+
+            </div>
+        </div>
+
+    </div>
+@endsection
+
+
+{{-- REQUIRED JS ONLY --}}
+@push('script')
+    <!-- For Multiple Select -->
+    <script src="{{ asset('backend/assets/vendors/select2/select2.min.js') }}"></script>
+    <script src="{{ asset('backend/assets/js/select2.js') }}"></script>
+@endpush
+
+
+
+===============================
+C:\Users\al_amin\Herd\christophlombar\resources\views\backend\layouts\projects\partials\_projectsJS.blade.php
+
+<script>
+    $(document).ready(function () {
+        var dt = $('#projects-table').DataTable({
+            processing: true,
+            serverSide: true,
+            stateSave: true,
+            ajax: "{{ route('admin.projects.index') }}",
+            order: [[1, 'desc']],
+            language: {
+                paginate: {
+                    previous: '<i class="fas fa-angle-left"></i>',
+                    next: '<i class="fas fa-angle-right"></i>'
+                },
+                processing: dataTableLoader()
+            },
+            columns: [
+                { data: 'DT_RowIndex', name: 'DT_RowIndex', orderable: false, searchable: false },
+                { data: 'image', name: 'image', orderable: false, searchable: false },
+                { data: 'title', name: 'title' },
+                { data: 'action', name: 'action', orderable: false, searchable: false },
+            ]
+        });
+
+        // Delete
+        $(document).on('click', '.deletebtn', function () {
+            $('#delete_id').val($(this).data('id'));
+            $('#deletemodal').modal('show');
+        });
+
+        $('#delete_modal_clear').submit(function (e) {
+            e.preventDefault();
+            var id = $('#delete_id').val();
+
+            $.ajax({
+                url: '/admin/projects/' + id,
+                type: 'DELETE',
+                data: { _token: '{{ csrf_token() }}' },
+                success: function (res) {
+                    $('#deletemodal').modal('hide');
+                    dt.ajax.reload(null, false);
+                    successModal(res.message);
+                },
+                error: function () {
+                    errorModal();
+                }
+            });
+        });
+    });
+</script>
+
+
+==================
+
+Make store and update one request files, as=>
+
+<?php
+namespace App\Http\Requests\Industry;
+
+use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Support\Str;
+
+class IndustryRequest extends FormRequest
+{
+    public function authorize(): bool
+    {
+        return true;
+    }
+
+    public function rules(): array
+    {
+        $id = $this->route('industry')?->id;
+
+        return [
+            'industrie_list_id'   => 'required|exists:industrie_lists,id|unique:industries,industrie_list_id,' . $id,
+
+            // MAIN SECTION
+            'main_title'               => 'required|string|max:255',
+            'title'               => 'required|string|max:255',
+            'subtitle'            => 'required|string|max:255',
+            'description'         => 'required|string',
+            'slug'                => 'required|string|max:255|unique:industries,slug,' . $id,
+            'image'               => 'nullable|image',
+
+            // HERO SECTION
+            'hero_title'          => 'required|string|max:255',
+            'hero_description'    => 'required|string',
+            'hero_image'          => 'nullable|image',
+            'hero_button_text'  => 'nullable|string|max:255',
+            'hero_button_link'  => 'nullable|string',
+
+            // GALLERY
+            'gallery_title'       => 'required|string|max:255',
+            'gallery_description' => 'required|string',
+            'gallery_images.*'    => 'image',
+
+            // SUB FOOTER
+            'footer_image'        => 'nullable|image',
+            'footer_main_title'   => 'nullable|string|max:255',
+            'footer_title'        => 'required|string|max:255',
+            'footer_description'  => 'required|string',
+            'footer_button_text'  => 'nullable|string|max:255',
+            'footer_button_link'  => 'nullable|string',
+
+            'is_active'           => 'required|boolean',
+        ];
+    }
+
+    public function messages(): array
+    {
+        return [
+            'industrie_list_id.unique'=> 'The selected industry Category is already associated with another industry.',
+        ];
+    }
+
+    protected function prepareForValidation()
+    {
+        $this->merge([
+            'slug'      => Str::slug(trim(strtolower($this->slug))),
+            'is_active' => $this->has('is_active'),
+        ]);
+    }
+}
+
+
+===================
+
+and make one blade file for both create and edit
+as demo,
+
+  <form
+                    action="{{ isset($industry) ? route('admin.industries.lists.update', $industry->id) : route('admin.industries.lists.store') }}"
+                    method="POST" enctype="multipart/form-data">
+                    @csrf
+                    @if (isset($industry))
+                        @method('PUT')
+                    @endif
+
+                    <!-- HERO SECTION -->
+                    <h4>Hero Section</h4>
+                    <div class="row mb-3">
+
+                        <div class="col-md-12">
+                            <label>Hero Title</label>
+                            <input type="text" name="hero_title" class="form-control"
+                                value="{{ old('hero_title', $industry->hero_title ?? '') }}">
+                            @error('hero_title')
+                                <small class="text-danger">{{ $message }}</small>
+                            @enderror
+                        </div>
+
+                        <div class="col-md-12 mt-3">
+                            <label>Hero Description</label>
+                            <textarea name="hero_description" class="form-control">{{ old('hero_description', $industry->hero_description ?? '') }}</textarea>
+                            @error('hero_description')
+                                <small class="text-danger">{{ $message }}</small>
+                            @enderror
+                        </div>
+
+                        <div class="col-md-6 mt-3">
+                            <label>Hero Button Text</label>
+                            <input type="text" name="hero_button_text" class="form-control"
+                                value="{{ old('hero_button_text', $industry->hero_button_text ?? '') }}">
+                            @error('hero_button_text')
+                                <small class="text-danger">{{ $message }}</small>
+                            @enderror
+                        </div>
+
+                        <div class="col-md-6 mt-3">
+                            <label>Hero Button Link</label>
+                            <input type="text" name="hero_button_link" class="form-control"
+                                value="{{ old('hero_button_link', $industry->hero_button_link ?? '') }}">
+                            @error('hero_button_link')
+                                <small class="text-danger">{{ $message }}</small>
+                            @enderror
+                        </div>
+
+                        <div class="col-md-12 mt-3">
+                            <label>Hero Image</label>
+                            <input type="file" name="hero_image" class="dropify"
+                                data-default-file="{{ isset($industry->hero_image) ? asset($industry->hero_image) : '' }}">
+                            @error('hero_image')
+                                <small class="text-danger">{{ $message }}</small>
+                            @enderror
+                        </div>
+
+                    </div>
+
+                    <!-- MAIN SECTION -->
+                    <h4 class="mt-4">Main Section</h4>
+                    <div class="row mb-3">
+
+                        <div class="col-md-6 mt-3">
+                            <label>Industry Category</label>
+                            <select name="industrie_list_id" class="form-control">
+                                <option value="">-- Select Category --</option>
+                                @foreach ($industrieLists as $list)
+                                    <option value="{{ $list->id }}"
+                                        {{ old('industrie_list_id', $industry->industrie_list_id ?? '') == $list->id ? 'selected' : '' }}>
+                                        {{ $list->title }}
+                                    </option>
+                                @endforeach
+                            </select>
+                            @error('industrie_list_id')
+                                <small class="text-danger">{{ $message }}</small>
+                            @enderror
+                        </div>
+
+                        <div class="col-md-6 mt-3">
+                            <label>Main Title</label>
+                            <input type="text" name="main_title" id="main_title" class="form-control"
+                                value="{{ old('main_title', $industry->main_title ?? '') }}">
+                            @error('main_title')
+                                <small class="text-danger">{{ $message }}</small>
+                            @enderror
+                        </div>
+                        <div class="col-md-6 mt-3">
+                            <label>Title</label>
+                            <input type="text" name="title" id="title" class="form-control"
+                                value="{{ old('title', $industry->title ?? '') }}">
+                            @error('title')
+                                <small class="text-danger">{{ $message }}</small>
+                            @enderror
+                        </div>
+
+                        <div class="col-md-6 mt-3">
+                            <label>Slug</label>
+                            <input type="text" name="slug" id="slug" class="form-control"
+                                value="{{ old('slug', $industry->slug ?? '') }}">
+                            @error('slug')
+                                <small class="text-danger">{{ $message }}</small>
+                            @enderror
+                        </div>
+
+                        <div class="col-md-12 mt-3">
+                            <label>Subtitle</label>
+                            <input type="text" name="subtitle" class="form-control"
+                                value="{{ old('subtitle', $industry->subtitle ?? '') }}">
+                            @error('subtitle')
+                                <small class="text-danger">{{ $message }}</small>
+                            @enderror
+                        </div>
+
+
+
+                        <div class="col-md-12 mt-3">
+                            <label>Main Description</label>
+                            <textarea name="description" id="summernote" class="form-control">{{ old('description', $industry->description ?? '') }}</textarea>
+                            @error('description')
+                                <small class="text-danger">{{ $message }}</small>
+                            @enderror
+                        </div>
+
+                        <div class="col-md-12 mt-3">
+                            <label>Main Image</label>
+                            <input type="file" name="image" class="dropify"
+                                data-default-file="{{ isset($industry->image) ? asset($industry->image) : '' }}">
+                            @error('image')
+                                <small class="text-danger">{{ $message }}</small>
+                            @enderror
+                        </div>
+
+                    </div>
+
+                    <!-- GALLERY SECTION -->
+                    <h4 class="mt-4">Gallery Section</h4>
+                    <div class="row mb-3">
+                        <div class="col-md-12">
+                            <label>Gallery Title</label>
+                            <input type="text" name="gallery_title" class="form-control"
+                                value="{{ old('gallery_title', $industry->gallery_title ?? '') }}">
+                            @error('gallery_title')
+                                <small class="text-danger">{{ $message }}</small>
+                            @enderror
+                        </div>
+
+                        <div class="col-md-12 mt-3">
+                            <label>Gallery Description</label>
+                            <textarea name="gallery_description" class="form-control">{{ old('gallery_description', $industry->gallery_description ?? '') }}</textarea>
+                            @error('gallery_description')
+                                <small class="text-danger">{{ $message }}</small>
+                            @enderror
+                        </div>
+
+                        <div class="col-md-12 mt-3">
+                            <label>Gallery Images</label>
+
+                            <!-- Existing Gallery Images -->
+                            @if (isset($industry->gallery_images) && count($industry->gallery_images))
+                                <div class="mb-3 d-flex flex-wrap" id="existing-gallery">
+                                    @foreach ($industry->gallery_images as $img)
+                                        <div class="position-relative me-2 mb-2" style="width: 120px; height: 80px;">
+                                            <img src="{{ asset($img) }}" class="img-thumbnail w-100 h-100"
+                                                style="object-fit: cover;">
+                                            <button type="button"
+                                                class="btn btn-sm btn-danger position-absolute top-0 end-0 delete-gallery-image"
+                                                data-id="{{ $industry->id }}" data-img="{{ $img }}"
+                                                style="z-index: 10;">
+                                                <i class="fa fa-times"></i>
+                                            </button>
+                                        </div>
+                                    @endforeach
+                                </div>
+                            @endif
+
+                            <!-- New Gallery Images -->
+                            <div id="gallery-wrapper">
+                                <div class="gallery-row d-flex mb-2 align-items-center">
+                                    <input type="file" name="gallery_images[]" class="form-control me-2">
+                                    <button type="button" class="btn btn-success add-gallery">
+                                        <i class="fa fa-plus"></i>
+                                    </button>
+                                </div>
+                            </div>
+
+                            @error('gallery_images.*')
+                                <small class="text-danger">{{ $message }}</small>
+                            @enderror
+                        </div>
+
+                    </div>
+
+                    <!-- SUB FOOTER SECTION -->
+                    <h4 class="mt-4">Sub Footer Section</h4>
+                    <div class="row mb-3">
+                        <div class="col-md-6 mt-3">
+                            <label>Sub Footer Main Title</label>
+                            <input type="text" name="footer_main_title" class="form-control"
+                                value="{{ old('footer_main_title', $industry->footer_main_title ?? '') }}">
+                            @error('footer_main_title')
+                                <small class="text-danger">{{ $message }}</small>
+                            @enderror
+                        </div>
+
+                        <div class="col-md-6 mt-3">
+                            <label>Sub Footer Title</label>
+                            <input type="text" name="footer_title" class="form-control"
+                                value="{{ old('footer_title', $industry->footer_title ?? '') }}">
+                            @error('footer_title')
+                                <small class="text-danger">{{ $message }}</small>
+                            @enderror
+                        </div>
+
+                        <div class="col-md-6 mt-3">
+                            <label>Sub Footer Button Text</label>
+                            <input type="text" name="footer_button_text" class="form-control"
+                                value="{{ old('footer_button_text', $industry->footer_button_text ?? '') }}">
+                            @error('footer_button_text')
+                                <small class="text-danger">{{ $message }}</small>
+                            @enderror
+                        </div>
+
+                        <div class="col-md-6 mt-3">
+                            <label>Sub Footer Button Link</label>
+                            <input type="text" name="footer_button_link" class="form-control"
+                                value="{{ old('footer_button_link', $industry->footer_button_link ?? '') }}">
+                            @error('footer_button_link')
+                                <small class="text-danger">{{ $message }}</small>
+                            @enderror
+                        </div>
+
+                        <div class="col-md-12 mt-3">
+                            <label>Sub Footer Description</label>
+                            <textarea name="footer_description" rows="3" class="form-control">{{ old('footer_description', $industry->footer_description ?? '') }}</textarea>
+                            @error('footer_description')
+                                <small class="text-danger">{{ $message }}</small>
+                            @enderror
+                        </div>
+
+                        <div class="col-md-12 mt-3">
+                            <label>Sub Footer Image</label>
+                            <input type="file" name="footer_image" class="dropify"
+                                data-default-file="{{ isset($industry->footer_image) ? asset($industry->footer_image) : '' }}">
+                            @error('footer_image')
+                                <small class="text-danger">{{ $message }}</small>
+                            @enderror
+                        </div>
+                    </div>
+
+                    <div class="mt-4 form-check form-switch form-switch-lg">
+                        <input type="checkbox" class="form-check-input" name="is_active"
+                            {{ old('is_active', $industry->is_active ?? false) ? 'checked' : '' }}>
+                        <label class="form-check-label">Active</label>
+                    </div>
+
+                    <div class="mt-4 float-end">
+                        <a href="{{ route('admin.industries.lists.index') }}"
+                            class="btn btn-secondary btn-lg me-2">Back</a>
+                        <button type="submit" class="btn btn-primary btn-lg">
+                            {{ isset($industry) ? 'Update' : 'Save' }}
+                        </button>
+                    </div>
+
+                </form>

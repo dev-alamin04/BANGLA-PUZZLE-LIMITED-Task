@@ -1,0 +1,50 @@
+# Laravel
+/vendor
+/node_modules
+
+.env
+.env.*
+!.env.example
+
+/storage/*.key
+/storage/pail
+/storage/logs
+/storage/framework/*
+!storage/framework/.gitignore
+
+/public/storage
+/public/hot
+
+/bootstrap/cache/*
+!bootstrap/cache/.gitignore
+
+# PHPUnit
+/.phpunit.cache
+.phpunit.result.cache
+
+# IDE / Editor
+/.idea
+/.vscode
+/.fleet
+/.nova
+/.zed
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Composer
+auth.json
+
+# Node / NPM
+npm-debug.log
+yarn-error.log
+pnpm-debug.log
+
+# Homestead
+Homestead.json
+Homestead.yaml
+
+# Firebase / Google credentials (do NOT push)
+storage/app/firebase
+

@@ -1,0 +1,359 @@
+C:\Users\al_amin\Herd\davidleeortiz2_laravel\routes\backend.php
+
+Route::resource('rv-makes', RvMakeController::class)->except(['show', 'create', 'edit']);
+Route::patch('rv-makes/{rvMake}/status', [RvMakeController::class, 'status'])->name('rv-makes.status');
+
+C:\Users\al_amin\Herd\davidleeortiz2_laravel\app\Http\Controllers\Web\Backend\RV\RvModelController.php
+
+```php
+<?php
+
+namespace App\Http\Controllers\Web\Backend\RV;
+
+use App\Http\Controllers\Controller;
+use App\Models\RvModel;
+use App\Models\RvMake;
+use Illuminate\Http\Request;
+use Yajra\DataTables\DataTables;
+use Illuminate\Support\Str;
+
+class RvModelController extends Controller
+{
+    public function index(Request $request)
+    {
+        if ($request->ajax()) {
+            $query = RvModel::with('make')->orderByDesc('id');
+            return DataTables::of($query)
+                ->addIndexColumn()
+                ->addColumn('make_name', fn($model) => $model->make?->name ?? '-')
+                ->addColumn('is_active', function ($model) {
+                    $next = $model->is_active ? 0 : 1;
+                    $checked = $model->is_active ? 'checked' : '';
+                    return '
+                    <a href="#" class="change_status text-center"
+                        data-id="' . $model->id . '"
+                        data-enabled="' . $next . '"
+                        data-title="Do you want to ' . ($next ? 'Enable' : 'Disable') . ' it?"
+                        data-description="' . ($next ? 'It will be active' : "It will be inactive") . '">
+                        <label class="switch">
+                            <input type="checkbox" ' . $checked . '>
+                            <span class="slider round"></span>
+                        </label>
+                    </a>';
+                })
+                ->addColumn('action', function ($model) {
+                    return '
+                        <div class="text-center">
+                            <div class="btn-group btn-group-sm">
+                                <a href="#" class="btn btn-primary edit-model text-white"
+                                   data-id="' . $model->id . '"
+                                   data-name="' . $model->name . '"
+                                   data-make_id="' . $model->rv_make_id . '">
+                                    <i class="fas fa-pencil-alt"></i>
+                                </a>
+                                <a href="#" class="btn btn-danger deletebtn text-white" data-id="' . $model->id . '">
+                                    <i class="fas fa-trash-alt"></i>
+                                </a>
+                            </div>
+                        </div>';
+                })
+                ->rawColumns(['is_active', 'action'])
+                ->make(true);
+        }
+
+        $makes = RvMake::active()->orderBy('name')->get();
+        return view('backend.layouts.rv.models.index', compact('makes'));
+    }
+
+    public function store(Request $request)
+    {
+        $validated = $request->validate([
+            'name' => 'required|string|max:150',
+            'rv_make_id' => 'required|exists:rv_makes,id',
+        ]);
+
+        $slug = Str::slug($validated['name']);
+
+        $data = [
+            'name' => $validated['name'],
+            'rv_make_id' => $validated['rv_make_id'],
+            'slug' => $slug,
+            'is_active' => true
+        ];
+
+        if (RvModel::where('slug', $slug)->exists()) {
+            return response()->json(['errors' => ['name' => ['The model name has already been taken.']]], 422);
+        }
+
+        RvModel::create($data);
+        return response()->json(['message' => 'Model created successfully.']);
+    }
+
+
+    public function update(Request $request, RvModel $rvModel)
+    {
+        $request->validate([
+            'name' => 'required|string|max:150',
+            'rv_make_id' => 'required|exists:rv_makes,id',
+        ]);
+
+        $slug = Str::slug($request->name);
+
+        if (RvModel::where('slug', $slug)->whereNot('id', $rvModel->id)->exists()) {
+            return response()->json(['errors' => ['name' => ['The model name has already been taken.']]], 422);
+        }
+
+        $rvModel->update([
+            'name' => $request->name,
+            'slug' => $slug,
+            'rv_make_id' => $request->rv_make_id,
+        ]);
+
+        return response()->json(['message' => 'Model updated successfully.']);
+    }
+
+    public function destroy(RvModel $rvModel)
+    {
+        $rvModel->delete();
+        return response()->json(['message' => 'Model deleted successfully.']);
+    }
+
+    public function status(RvModel $rvModel, Request $request)
+    {
+        $rvModel->update(['is_active' => $request->is_active]);
+        return response()->json(['message' => 'Status updated successfully.']);
+    }
+}
+
+```
+
+
+
+=========================
+
+C:\Users\al_amin\Herd\davidleeortiz2_laravel\resources\views\backend\layouts\rv\makes\index.blade.php
+
+@extends('backend.layouts.app')
+@section('title', ' || Makes')
+@section('content')
+    <div class="content-wrapper">
+        <x-breadcrumbs title="Makes" :breadcrumbs="[['text' => 'Makes', 'url' => route('rv-makes.index')]]" />
+
+        <div class="row">
+            <div class="col-12 grid-margin stretch-card">
+                <div class="card">
+                    <div class="card-body">
+                        <h4 class="card-title table-title d-inline-block table-title">RV Makes List</h4>
+                        <button class="btn btn-primary" id="addMakeBtn" style="float:right">Add Make</button>
+                        <hr />
+                        <div class="table-responsive">
+                            <table class="table table-hover table-striped" id="makes-table">
+                                <thead>
+                                    <tr>
+                                        <th>S/L</th>
+                                        <th>Name</th>
+                                        <th>Year</th>
+                                        <th>Status</th>
+                                        <th class="text-center">Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+@endsection
+
+@section('modal')
+    @include('backend.layouts.rv.makes.partials._make_modal')
+    <x-status-modal modalId="statusModal" formId="status_modal_clear" />
+@endsection
+
+@section('script')
+    @include('backend.layouts.rv.makes.partials._makesJS')
+@endsection
+
+
+============
+
+C:\Users\al_amin\Herd\davidleeortiz2_laravel\resources\views\backend\layouts\rv\makes\partials\_make_modal.blade.php
+
+<div class="modal fade" id="makeModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <form id="make_form" class="w-100">
+            @csrf
+            <input type="hidden" name="id" id="make_id">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h4 class="modal-title" id="makeModalLabel">Add RV Make</h4>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label>Name</label>
+                        <input type="text" name="name" id="make_name" class="form-control" placeholder="Enter Name" required>
+                        <span class="text-danger" id="error_name"></span>
+                    </div>
+                    <div class="mb-3">
+                        <label>Year</label>
+                        <select name="rv_year_id" id="make_year" class="form-control" required>
+                            <option value="">Select Year</option>
+                            @foreach($years as $year)
+                                <option value="{{ $year->id }}">{{ $year->year }}</option>
+                            @endforeach
+                        </select>
+                        <span class="text-danger" id="error_year"></span>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary modal-btn" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary modal-btn">Save</button>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+
+===========================
+
+C:\Users\al_amin\Herd\davidleeortiz2_laravel\resources\views\backend\layouts\rv\makes\partials\_makesJS.blade.php
+
+<script>
+    $(document).ready(function () {
+        // Initialize DataTable
+        var dt = $('#makes-table').DataTable({
+            processing: true,
+            serverSide: true,
+            ajax: '{{ route("rv-makes.index") }}',
+            order: [[0, 'desc']],
+            language: {
+                paginate: { previous: '<i class="fas fa-angle-left"></i>', next: '<i class="fas fa-angle-right"></i>' },
+                processing: dataTableLoader()
+            },
+            columns: [
+                { data: 'DT_RowIndex', name: 'DT_RowIndex', orderable: false, searchable: false },
+                { data: 'name', name: 'name' },
+                { data: 'year', name: 'year' },
+                { data: 'is_active', name: 'is_active', orderable: false, searchable: false },
+                { data: 'action', name: 'action', orderable: false, searchable: false }
+            ]
+        });
+
+        // Open Add Modal
+        $('#addMakeBtn').click(function () {
+            $('#make_form')[0].reset();
+            $('#make_id').val('');
+            clearErrors();
+            $('#makeModalLabel').text('Add RV Make');
+            $('.text-danger').text('');
+            $('#makeModal').modal('show');
+        });
+
+        // Open Edit Modal
+        $(document).on('click', '.edit-make', function () {
+            var id = $(this).data('id');
+            var name = $(this).data('name');
+            var year_id = $(this).data('year_id');
+
+            $('#make_id').val(id);
+            $('#make_name').val(name);
+            $('#make_year').val(year_id);
+            clearErrors();
+
+            $('#makeModalLabel').text('Edit RV Make');
+            $('.text-danger').text('');
+            $('#makeModal').modal('show');
+        });
+
+        // Add / Update Form Submit
+        $('#make_form').submit(function (e) {
+            e.preventDefault();
+            clearErrors();
+            var id = $('#make_id').val();
+            var url = id ? '{{ url("admin/rv-makes") }}/' + id : '{{ route("rv-makes.store") }}';
+            var method = id ? 'PATCH' : 'POST'; //
+
+            $.ajax({
+                url: url,
+                type: method,
+                data: $(this).serialize(),
+                success: function (res) {
+                    $('#makeModal').modal('hide');
+                    dt.ajax.reload(null, false);
+                    successModal(res.message || 'Saved successfully');
+                },
+                error: function (xhr) {
+                    if (xhr.status === 422) {
+                        var errors = xhr.responseJSON.errors;
+                        $('#error_name').text(errors?.name ? errors.name[0] : '');
+                        $('#error_year').text(errors?.rv_year_id ? errors.rv_year_id[0] : '');
+                    } else {
+                        errorModal();
+                        console.error(xhr.responseText);
+                    }
+                }
+            });
+        });
+
+
+        // Delete Make
+        $(document).on('click', '.deletebtn', function () {
+            $('#delete_id').val($(this).data('id'));
+            $('#delete_type').val('make');
+            $('#deletemodal').modal('show');
+        });
+
+        $('#delete_modal_clear').on('submit', function (e) {
+            e.preventDefault();
+            var id = $('#delete_id').val();
+
+            $.ajax({
+                url: '{{ url("admin/rv-makes") }}/' + id,
+                type: 'DELETE',
+                data: { _token: '{{ csrf_token() }}' },
+                success: function (res) {
+                    dt.ajax.reload(null, false);
+                    successModal(res.message || 'Deleted successfully');
+                },
+                error: function (xhr) {
+                    errorModal();
+                    console.error(xhr.responseText || xhr.statusText);
+                }
+            });
+        });
+
+        // Change Status
+        $(document).on('click', '.change_status', function (e) {
+            e.preventDefault();
+            $('#status_id').val($(this).data('id'));
+            $('#status_enabled').val($(this).data('enabled'));
+            $('#status_title').text($(this).data('title'));
+            $('#status_description').text($(this).data('description'));
+            $('#statusModal').modal('show');
+        });
+
+        $('#status_modal_clear').on('submit', function (e) {
+            e.preventDefault();
+            var id = $('#status_id').val();
+            var isActive = $('#status_enabled').val();
+
+            $.ajax({
+                url: '{{ url("admin/rv-makes") }}/' + id + '/status',
+                type: 'PATCH',
+                data: { is_active: isActive },
+                success: function () {
+                    dt.ajax.reload(null, false);
+                    successModal('Status updated successfully');
+                },
+                error: function () {
+                    errorModal();
+                }
+            });
+        });
+    });
+
+</script>
