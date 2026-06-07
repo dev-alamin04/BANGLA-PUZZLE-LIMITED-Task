@@ -25,8 +25,8 @@ Thank you for visiting this repository.
 ### 1. Clone Repository
 
 ```bash
-git clone https://github.com/learnwithfair/laravel-stater-kit.git
-cd laravel-stater-kit
+git clone https://github.com/dev-alamin04/BANGLA-PUZZLE-LIMITED-Task.git
+cd BANGLA-PUZZLE-LIMITED-Task
 ```
 
 ### 2. Install Dependencies
